@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: linkflow-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/appdb_linkflow
+    username: postgres
+    password: devpass
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
