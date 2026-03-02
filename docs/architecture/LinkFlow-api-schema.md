@@ -1,46 +1,43 @@
-# LinkFlow API Schema (v2)
+﻿# LinkFlow API Schema (v3)
 
-## 1. Scope and Target
+## 1. Purpose and Scope
 
-LinkFlow is a high-concurrency intelligent short URL system:
+This document defines the backend API contracts for LinkFlow based on:
 
-- Frontend: React + Axios
-- Backend: Java Spring Boot
-- Data: PostgreSQL + Redis
-- Streaming: Kafka + Flink
-- Async jobs and notifications: RabbitMQ + WebSocket
-- AI: Hugging Face (classification/recommendation/risk) and optional Google Safe Browsing API
+- LinkFlow UI routes and data needs (`/dashboard`, `/links`, `/links/:id`, `/qr-codes`, `/alerts`, `/monitoring`, `/auth/login`)
+- The target architecture (`gateway`, `user-service`, `link-service`, `analytics-service`, `ai-service`)
+- Runtime stack (Spring Boot, PostgreSQL, Redis, Kafka, Flink, RabbitMQ, WebSocket)
 
-This schema covers the following scenarios:
+Goals:
 
-1. Short URL generation and high-concurrency redirection
-2. User management and JWT authorization
-3. Real-time log analytics
-4. Intelligent link classification and recommendation
-5. Spam and malicious link detection
-6. Data visualization and monitoring
-7. Frontend-ready API contracts
+1. Stable frontend contracts for CRUD, analytics, risk review, and monitoring.
+2. Clear request/response models for Spring Boot controller/service implementation.
+3. Explicit async boundaries (Kafka/Flink/RabbitMQ/WebSocket).
 
-## 2. API Conventions
+## 2. API Baseline Conventions
 
 - Base URL: `/api/v1`
-- Public redirect URL: `/{slug}` or `/r/{slug}`
-- Auth header: `Authorization: Bearer <jwt_access_token>`
-- Service auth (internal): `X-Service-Key: <service_key>`
-- Time format: ISO 8601 UTC
+- Public redirect URL: `/{slug}` and `/r/{slug}`
+- Auth header: `Authorization: Bearer <access_token>`
+- Service header (internal calls): `X-Service-Key: <service_key>`
+- Time format: ISO 8601 UTC (`TIMESTAMPTZ` compatible)
 - ID format: UUID
+- Content type: `application/json; charset=utf-8`
 
-Standard success:
+### 2.1 Standard Response Envelope
+
+Success:
 
 ```json
 {
   "request_id": "req_01JH4F7H7W4KPK9M9X2Z",
   "data": {},
-  "error": null
+  "error": null,
+  "meta": {}
 }
 ```
 
-Standard error:
+Error:
 
 ```json
 {
@@ -50,13 +47,51 @@ Standard error:
     "code": "LINK_NOT_FOUND",
     "message": "Short link does not exist or is inactive.",
     "details": {}
-  }
+  },
+  "meta": {}
 }
 ```
 
-## 3. Domain Models (API Level)
+Pagination (`meta.page`):
 
-### 3.1 User
+```json
+{
+  "page": 1,
+  "size": 20,
+  "total_elements": 358,
+  "total_pages": 18,
+  "has_next": true
+}
+```
+
+### 2.2 Common Query Parameters
+
+- `page` (default `1`)
+- `size` (default `20`, max `100`)
+- `sort` (e.g. `created_at,desc`)
+- `from` / `to` (ISO 8601)
+- `window` (`5m`, `15m`, `1h`, `24h`)
+
+### 2.3 Idempotency
+
+For create-like write endpoints, support:
+
+- Header: `Idempotency-Key: <uuid>`
+- Deduplicate repeated requests within 24h
+- Return same response body for same key + same authenticated user
+
+## 3. Domain Enums
+
+`role`: `user | admin`  
+`user_status`: `active | suspended | deleted`  
+`link_status`: `active | paused | expired | blocked`  
+`risk_level`: `unknown | low | medium | high | critical`  
+`alert_status`: `pending | approved | blocked | blacklisted`  
+`task_status`: `queued | running | succeeded | failed | cancelled`
+
+## 4. Core API Models
+
+### 4.1 User
 
 ```json
 {
@@ -69,24 +104,201 @@ Standard error:
 }
 ```
 
-### 3.2 Short Link
+### 4.2 Link Summary (for `/links`, `/qr-codes`)
 
 ```json
 {
   "id": "f42f857c-c9cc-4d1f-8b7f-bfc86098b0cb",
-  "owner_user_id": "4f5f4169-ece2-4d2e-b3b4-a03ff9dc5da4",
-  "slug": "x7Ab9Q",
-  "long_url": "https://example.com/articles/ai",
-  "title": "Example AI Article",
-  "channel": "twitter",
+  "slug": "promo2026",
+  "short_url": "https://lfow.io/promo2026",
+  "long_url": "https://example.com/campaign",
+  "title": "Spring Campaign",
+  "channel": "wechat",
   "status": "active",
-  "expires_at": null,
-  "click_count": 0,
-  "created_at": "2026-02-15T10:05:00Z"
+  "click_count": 45892,
+  "unique_visitors": 32847,
+  "created_at": "2026-02-15T10:05:00Z",
+  "expires_at": "2026-03-30T00:00:00Z"
 }
 ```
 
-### 3.3 Click Event (Kafka source payload)
+### 4.3 Risk Alert
+
+```json
+{
+  "id": "9adb658f-d98c-4abe-a66a-8d6637f4c9b4",
+  "link_id": "f42f857c-c9cc-4d1f-8b7f-bfc86098b0cb",
+  "short_url": "https://lfow.io/sus-deal",
+  "title": "Suspicious campaign link",
+  "risk_level": "high",
+  "risk_score": 87,
+  "reasons": ["domain_mismatch", "abnormal_traffic_spike"],
+  "status": "pending",
+  "detected_at": "2026-02-15T14:28:00Z",
+  "reporter": "ai-risk-engine"
+}
+```
+
+## 5. Endpoint Contracts
+
+## 5.1 Auth and JWT
+
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/refresh`
+- `POST /api/v1/auth/logout`
+- `GET /api/v1/auth/me`
+
+Login response:
+
+```json
+{
+  "request_id": "req_01",
+  "data": {
+    "access_token": "jwt_access_token",
+    "refresh_token": "jwt_refresh_token",
+    "token_type": "Bearer",
+    "expires_in": 3600,
+    "user": {
+      "id": "4f5f4169-ece2-4d2e-b3b4-a03ff9dc5da4",
+      "email": "alice@example.com",
+      "username": "alice",
+      "role": "user"
+    }
+  },
+  "error": null,
+  "meta": {}
+}
+```
+
+## 5.2 Link CRUD and QR Code
+
+- `POST /api/v1/links`
+- `GET /api/v1/links`
+- `GET /api/v1/links/{link_id}`
+- `PATCH /api/v1/links/{link_id}`
+- `PATCH /api/v1/links/{link_id}/status`
+- `DELETE /api/v1/links/{link_id}`
+- `GET /api/v1/links/{link_id}/qrcode?format=png&size=512`
+
+Create request:
+
+```json
+{
+  "long_url": "https://example.com/very/long/path",
+  "title": "Spring campaign",
+  "custom_slug": "my-campaign-2026",
+  "channel": "instagram",
+  "expires_at": "2026-03-30T00:00:00Z",
+  "tags": ["campaign", "spring"],
+  "metadata": {
+    "utm_source": "instagram"
+  }
+}
+```
+
+List query examples:
+
+- `/api/v1/links?page=1&size=20&status=active&search=promo&sort=created_at,desc`
+- `/api/v1/links?page=1&size=20&status=paused`
+
+Field validation:
+
+- `long_url`: required, valid URL, max 2048 chars
+- `custom_slug`: optional, regex `^[a-zA-Z0-9][a-zA-Z0-9_-]{2,79}$`
+- `title`: required, max 300 chars
+
+## 5.3 Redirect (High Concurrency)
+
+- `GET /{slug}`
+- `GET /r/{slug}`
+
+Behavior:
+
+1. Resolve `slug -> long_url` in Redis first.
+2. On cache miss, fallback to PostgreSQL and refill Redis.
+3. Return `302` or `307` immediately.
+4. Publish click event asynchronously to Kafka (`linkflow.click.raw.v1`).
+5. Trigger optional risk/AI pipeline asynchronously via RabbitMQ.
+
+## 5.4 Link Analytics (Detail Page)
+
+- `GET /api/v1/links/{link_id}/analytics/summary?from=...&to=...`
+- `GET /api/v1/links/{link_id}/analytics/timeseries?granularity=1h&from=...&to=...`
+- `GET /api/v1/links/{link_id}/analytics/devices?from=...&to=...`
+- `GET /api/v1/links/{link_id}/analytics/browsers?from=...&to=...`
+- `GET /api/v1/links/{link_id}/analytics/locations?from=...&to=...`
+- `GET /api/v1/links/{link_id}/access-logs?page=1&size=50`
+
+## 5.5 Dashboard APIs
+
+- `GET /api/v1/dashboard/summary?from=...&to=...`
+- `GET /api/v1/dashboard/trends?granularity=1h&from=...&to=...`
+- `GET /api/v1/dashboard/channels?from=...&to=...`
+- `GET /api/v1/dashboard/locations?from=...&to=...`
+- `GET /api/v1/analytics/realtime/overview?window=15m`
+- `GET /api/v1/analytics/realtime/hot-links?window=15m&limit=10`
+
+## 5.6 Risk Alerts and Review
+
+- `GET /api/v1/risk/alerts?page=1&size=20&risk_level=high&status=pending&search=promo`
+- `GET /api/v1/risk/alerts/{alert_id}`
+- `POST /api/v1/risk/scan/tasks`
+- `GET /api/v1/risk/scan/tasks/{task_id}`
+- `POST /api/v1/admin/risk/alerts/{alert_id}/review` (admin)
+- `POST /api/v1/admin/risk/blacklist/domain` (admin)
+- `POST /api/v1/admin/risk/blacklist/url` (admin)
+
+Review request:
+
+```json
+{
+  "action": "blocked",
+  "comment": "Confirmed phishing landing page"
+}
+```
+
+`action` allowed values: `approved | blocked | blacklisted`
+
+## 5.7 Monitoring APIs
+
+- `GET /api/v1/monitoring/health`
+- `GET /api/v1/monitoring/services`
+- `GET /api/v1/monitoring/redis`
+- `GET /api/v1/monitoring/kafka`
+- `GET /api/v1/monitoring/rabbitmq`
+- `GET /api/v1/monitoring/flink/jobs`
+- `GET /api/v1/monitoring/metrics/timeseries?metric=qps&window=1h`
+
+## 5.8 WebSocket Contracts
+
+Handshake:
+
+- `POST /api/v1/ws/token`
+
+Realtime endpoint:
+
+- `GET /ws/realtime?token=<ws_token>`
+
+Server events:
+
+- `analytics.realtime.updated`
+- `analytics.hot_links.updated`
+- `risk.alert.created`
+- `ai.task.status_changed`
+- `system.pipeline.degraded`
+
+## 6. Async Message Contracts
+
+## 6.1 Kafka Topics
+
+- `linkflow.click.raw.v1`
+- `linkflow.click.enriched.v1`
+- `linkflow.link.lifecycle.v1`
+- `linkflow.analytics.agg.1m.v1`
+- `linkflow.analytics.hot.v1`
+
+`linkflow.click.raw.v1` value:
 
 ```json
 {
@@ -102,250 +314,26 @@ Standard error:
   "os": "Android",
   "referrer": "https://t.co/...",
   "channel": "twitter",
-  "utm_source": "twitter",
   "is_bot": false
 }
 ```
 
-## 4. Endpoint Groups
+## 6.2 Flink Jobs
 
-### 4.1 Auth and JWT
-中文说明：提供用户注册、登录、令牌刷新与身份校验能力。
+- `job_click_agg_1m`
+- `job_hot_links_5m`
+- `job_geo_channel_agg`
+- `job_user_interest_profile`
 
-- `POST /api/v1/auth/register`
-- `POST /api/v1/auth/login`
-- `POST /api/v1/auth/refresh`
-- `POST /api/v1/auth/logout`
-- `GET /api/v1/auth/me`
-
-Login response:
-
-```json
-{
-  "access_token": "jwt_access_token",
-  "refresh_token": "jwt_refresh_token",
-  "token_type": "Bearer",
-  "expires_in": 3600,
-  "user": {
-    "id": "4f5f4169-ece2-4d2e-b3b4-a03ff9dc5da4",
-    "email": "alice@example.com",
-    "username": "alice",
-    "role": "user"
-  }
-}
-```
-
-### 4.2 User and Permission
-中文说明：管理用户资料、用户状态与管理员权限操作。
-
-- `GET /api/v1/users/me`
-- `PATCH /api/v1/users/me`
-- `GET /api/v1/users/me/links`
-- `GET /api/v1/admin/users` (admin only)
-- `PATCH /api/v1/admin/users/{user_id}/status` (admin only)
-
-### 4.3 Short URL CRUD
-中文说明：提供短链接创建、查询、更新、删除的核心接口。
-
-- `POST /api/v1/links`
-- `GET /api/v1/links/{link_id}`
-- `GET /api/v1/links`
-- `PATCH /api/v1/links/{link_id}`
-- `DELETE /api/v1/links/{link_id}`
-
-Create link request:
-
-```json
-{
-  "long_url": "https://example.com/very/long/path",
-  "custom_slug": "my-campaign-2026",
-  "channel": "instagram",
-  "expires_at": "2026-03-30T00:00:00Z"
-}
-```
-
-Create link response:
-
-```json
-{
-  "id": "f42f857c-c9cc-4d1f-8b7f-bfc86098b0cb",
-  "slug": "my-campaign-2026",
-  "short_url": "https://lfow.io/my-campaign-2026",
-  "long_url": "https://example.com/very/long/path",
-  "channel": "instagram",
-  "status": "active"
-}
-```
-
-### 4.4 Redirect (High Concurrency Path)
-中文说明：定义高并发重定向主链路，强调 Redis 命中与异步日志。
-
-- `GET /{slug}`
-- `GET /r/{slug}`
-
-Redirect behavior:
-
-1. Resolve `slug -> long_url` via Redis (cache hit first)
-2. Fallback to PostgreSQL on cache miss, then refill Redis
-3. Return HTTP 302/307 redirect
-4. Emit click log asynchronously to Kafka topic
-5. Trigger risk check and AI tasks asynchronously when configured
-
-### 4.5 Link Ownership and History
-中文说明：查询链接归属与历史访问记录，支持用户侧追踪。
-
-- `GET /api/v1/links/{link_id}/history`
-- `GET /api/v1/links/{link_id}/clicks`
-- `GET /api/v1/users/me/recent-links`
-
-### 4.6 Real-Time Analytics (Flink output APIs)
-中文说明：提供实时分析结果查询，包括趋势、地域和渠道拆解。
-
-- `GET /api/v1/analytics/realtime/overview?window=15m`
-- `GET /api/v1/analytics/realtime/hot-links?window=15m&limit=10`
-- `GET /api/v1/analytics/links/{link_id}/timeseries?granularity=1m&from=...&to=...`
-- `GET /api/v1/analytics/links/{link_id}/location-breakdown?from=...&to=...`
-- `GET /api/v1/analytics/links/{link_id}/channel-breakdown?from=...&to=...`
-- `GET /api/v1/analytics/realtime/traffic-map?window=15m`
-
-### 4.7 Link Classification (AI)
-中文说明：提交与查询链接分类任务，存储并返回 AI 分类结果。
-
-- `POST /api/v1/ai/classification/tasks`
-- `GET /api/v1/ai/classification/tasks/{task_id}`
-- `GET /api/v1/links/{link_id}/classification`
-- `POST /api/v1/links/{link_id}/classification/retry`
-
-Create classification task request:
-
-```json
-{
-  "link_id": "f42f857c-c9cc-4d1f-8b7f-bfc86098b0cb",
-  "provider": "huggingface",
-  "model": "facebook/bart-large-mnli"
-}
-```
-
-### 4.8 Recommendation (AI)
-中文说明：提交推荐任务并返回个性化推荐结果，支持用户反馈闭环。
-
-- `POST /api/v1/ai/recommendation/tasks`
-- `GET /api/v1/ai/recommendation/tasks/{task_id}`
-- `GET /api/v1/users/me/recommendations?limit=20`
-- `POST /api/v1/users/me/recommendations/feedback`
-
-Feedback request:
-
-```json
-{
-  "recommendation_id": "37b60dad-b90e-486b-a06c-b8c8e93917af",
-  "action": "clicked"
-}
-```
-
-### 4.9 Spam and Malicious Link Detection
-中文说明：提供垃圾链接与恶意链接检测、审核和黑名单管理能力。
-
-- `POST /api/v1/risk/scan/tasks`
-- `GET /api/v1/risk/scan/tasks/{task_id}`
-- `GET /api/v1/links/{link_id}/risk-report`
-- `POST /api/v1/admin/risk/links/{link_id}/review` (admin only)
-- `POST /api/v1/admin/risk/blacklist/domain` (admin only)
-- `POST /api/v1/admin/risk/blacklist/url` (admin only)
-
-Create risk scan request:
-
-```json
-{
-  "link_id": "f42f857c-c9cc-4d1f-8b7f-bfc86098b0cb",
-  "providers": ["huggingface", "google_safe_browsing"]
-}
-```
-
-### 4.10 Dashboard and Monitoring APIs
-中文说明：提供业务看板与系统监控指标查询接口。
-
-- `GET /api/v1/dashboard/summary?from=...&to=...`
-- `GET /api/v1/dashboard/trends?granularity=1h&from=...&to=...`
-- `GET /api/v1/dashboard/channels?from=...&to=...`
-- `GET /api/v1/dashboard/locations?from=...&to=...`
-
-System metrics endpoints:
-
-- `GET /api/v1/monitoring/health`
-- `GET /api/v1/monitoring/redis`
-- `GET /api/v1/monitoring/kafka`
-- `GET /api/v1/monitoring/rabbitmq`
-- `GET /api/v1/monitoring/flink/jobs`
-
-### 4.11 WebSocket Contracts
-中文说明：定义实时推送通道与事件格式，用于前端即时展示。
-
-Handshake:
-
-- `POST /api/v1/ws/token`
-
-Realtime WebSocket endpoint:
-
-- `GET /ws/realtime?token=<ws_token>`
-
-Server event names:
-
-- `analytics.realtime.updated`
-- `analytics.hot_links.updated`
-- `risk.alert.created`
-- `ai.task.status_changed`
-- `system.pipeline.degraded`
-
-Example WebSocket event payload:
-
-```json
-{
-  "event": "analytics.realtime.updated",
-  "occurred_at": "2026-02-15T10:10:00Z",
-  "data": {
-    "window": "15m",
-    "total_clicks": 12840,
-    "active_users": 624
-  }
-}
-```
-
-## 5. Async Messaging Contracts
-中文说明：定义 Kafka、Flink、RabbitMQ 的异步数据契约。
-
-### 5.1 Kafka Topics (Logs and Streaming Analytics)
-中文说明：点击日志和聚合结果的流式主题定义。
-
-- `linkflow.click.raw.v1`
-- `linkflow.click.enriched.v1`
-- `linkflow.link.lifecycle.v1`
-- `linkflow.analytics.agg.1m.v1`
-- `linkflow.analytics.hot.v1`
-
-`linkflow.click.raw.v1` key/value:
-
-- Key: `slug`
-- Value: Click Event JSON (see section 3.3)
-
-### 5.2 Flink Jobs
-中文说明：实时计算任务定义及其下游存储目标。
-
-- `job_click_agg_1m`: raw click stream -> per minute aggregates
-- `job_hot_links_5m`: rolling top links
-- `job_geo_channel_agg`: location and channel breakdown
-- `job_user_interest_profile`: update user interest vectors from click behavior
-
-Flink sink targets:
+Sink targets:
 
 - PostgreSQL aggregate tables
-- Redis hot dashboards cache
-- Kafka aggregated topics (optional)
+- Redis hot cache
+- Kafka aggregate topics (optional)
 
-### 5.3 RabbitMQ Exchanges and Queues
-中文说明：AI 异步任务与通知广播的队列和路由规则。
+## 6.3 RabbitMQ
 
-Exchange:
+Exchanges:
 
 - `linkflow.ai.exchange` (topic)
 - `linkflow.notify.exchange` (topic)
@@ -366,60 +354,70 @@ Routing keys:
 - `notify.ws.broadcast`
 - `notify.admin.alert`
 
-## 6. Redis Key Design (Performance)
-中文说明：定义高并发场景下的缓存键空间与 TTL 策略。
+## 7. Redis Key Design
 
 - `lf:slug:{slug}` -> `{long_url, link_id, status, expires_at}`
-- `lf:link:meta:{link_id}` -> link metadata
+- `lf:link:meta:{link_id}`
 - `lf:analytics:realtime:overview:{window}`
 - `lf:analytics:hot_links:{window}`
 - `lf:user:recommendations:{user_id}`
 - `lf:risk:blocklist:domain`
 - `lf:risk:blocklist:url`
 
-Cache policy suggestions:
+TTL guidance:
 
-- Redirect mapping TTL: 6h to 24h
-- Realtime analytics TTL: 30s to 2m
-- Recommendation cache TTL: 10m to 60m
+- Redirect mapping: 6h to 24h
+- Realtime analytics: 30s to 2m
+- Recommendations: 10m to 60m
 
-## 7. Frontend Integration Notes (React + Axios)
-中文说明：约束前端页面依赖的 API、鉴权刷新和实时订阅流程。
+## 8. Error Code Matrix
 
-Required pages and API dependencies:
+Authentication and authorization:
 
-1. Home page: `POST /api/v1/links`, `GET /api/v1/analytics/realtime/overview`
-2. Login/Register: `/api/v1/auth/register`, `/api/v1/auth/login`
-3. User dashboard: link CRUD + analytics + recommendations
-4. Admin dashboard: risk review + blacklist + monitoring
+- `AUTH_INVALID_CREDENTIALS` -> 401
+- `AUTH_TOKEN_EXPIRED` -> 401
+- `PERMISSION_DENIED` -> 403
 
-Axios requirements:
+Link lifecycle:
 
-- Interceptor for JWT refresh on 401
-- WebSocket token fetch before realtime subscription
+- `LINK_SLUG_CONFLICT` -> 409
+- `LINK_NOT_FOUND` -> 404
+- `LINK_EXPIRED` -> 410
+- `LINK_BLOCKED` -> 423
 
-## 8. Error Codes
-中文说明：统一错误码，便于前后端联调和异常定位。
+Risk/AI pipeline:
 
-- `AUTH_INVALID_CREDENTIALS`
-- `AUTH_TOKEN_EXPIRED`
-- `PERMISSION_DENIED`
-- `LINK_SLUG_CONFLICT`
-- `LINK_NOT_FOUND`
-- `LINK_EXPIRED`
-- `LINK_BLOCKED`
-- `RISK_SCAN_FAILED`
-- `AI_PROVIDER_UNAVAILABLE`
-- `KAFKA_PUBLISH_FAILED`
-- `RABBITMQ_PUBLISH_FAILED`
-- `FLINK_RESULT_UNAVAILABLE`
-- `RATE_LIMITED`
+- `RISK_SCAN_FAILED` -> 502
+- `AI_PROVIDER_UNAVAILABLE` -> 503
+
+Platform and throttling:
+
+- `KAFKA_PUBLISH_FAILED` -> 503
+- `RABBITMQ_PUBLISH_FAILED` -> 503
+- `FLINK_RESULT_UNAVAILABLE` -> 503
+- `RATE_LIMITED` -> 429
 
 ## 9. Non-Functional Targets
-中文说明：给出性能、可用性与可观测性方面的目标基线。
 
-1. Redirect P95 < 80ms with Redis cache hit.
-2. Redirect path must be non-blocking for logging and AI tasks.
-3. Kafka and RabbitMQ pipelines must support replay/retry.
-4. Dashboard data freshness target: 5s to 30s.
-5. End-to-end observability: request trace ID + event ID correlation.
+1. Redirect path P95 < 80ms on Redis hit.
+2. Redirect must stay non-blocking for logging and AI tasks.
+3. Dashboard data freshness target: 5s to 30s.
+4. Kafka/RabbitMQ pipelines support retry and replay.
+5. All responses include `request_id` and async payloads include `event_id` for traceability.
+
+## 10. Spring Boot Implementation Mapping (for backend coding)
+
+Recommended package split:
+
+- `com.linkflow.api.auth`
+- `com.linkflow.api.link`
+- `com.linkflow.api.analytics`
+- `com.linkflow.api.risk`
+- `com.linkflow.api.monitoring`
+
+Contract-first suggestion:
+
+1. Freeze DTOs in this schema first.
+2. Generate OpenAPI yaml/json from controller annotations.
+3. Keep API DTOs separated from JPA entities.
+4. Use cursor/page DTO wrappers aligned to `meta.page`.
