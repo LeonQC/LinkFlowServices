@@ -12,15 +12,16 @@ public class SecurityConfig { // security configuration class
     @Bean // expose filter chain as bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception { // build http security rules
         http
-                .csrf(csrf -> csrf.disable()) // disable csrf for API-only development stage
+                .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/short-urls").permitAll()
                         .requestMatchers("/api/short-urls/**").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
+                        .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated()
                 )
-                .httpBasic(Customizer.withDefaults()); // keep simple basic auth for protected endpoints
+                .httpBasic(Customizer.withDefaults());
 
-        return http.build(); // finalize and return filter chain
+        return http.build();
     }
 }

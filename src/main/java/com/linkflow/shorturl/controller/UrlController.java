@@ -2,10 +2,13 @@ package com.linkflow.shorturl.controller;
 
 import com.linkflow.shorturl.dto.CreateShortUrlRequest;
 import com.linkflow.shorturl.dto.CreateShortUrlResponse;
-import com.linkflow.shorturl.dto.ResolveShortUrlResponse;
 import com.linkflow.shorturl.service.UrlCodecService;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.net.URI;
 
 @RestController
 @RequestMapping("/api/short-urls")
@@ -28,8 +31,10 @@ public class UrlController {
     }
 
     @GetMapping("/{slug}")
-    public ResolveShortUrlResponse resolveShortUrl(@PathVariable String slug){
+    public ResponseEntity<Void> shortToLong(@PathVariable String slug){
         var mapping = urlCodecService.resolve(slug);
-        return new ResolveShortUrlResponse(mapping.getSlug(), mapping.getLongUrl());
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(URI.create(mapping.getLongUrl()))
+                .build();
     }
 }
