@@ -1,11 +1,11 @@
-package com.linkflow.shorturl.domain;
+package com.linkflow.api.link.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.OffsetDateTime;
@@ -28,9 +28,10 @@ public class UrlMapping {
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
-    protected  UrlMapping() {
+    protected UrlMapping() {
     }
-    public UrlMapping(String longUrl, String slug ) {
+
+    public UrlMapping(String longUrl, String slug) {
         this.slug = slug;
         this.longUrl = longUrl;
     }

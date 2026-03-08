@@ -1,6 +1,7 @@
-package com.linkflow.shorturl.dto;
+package com.linkflow.api.link.dto;
 
 public record ResolveShortUrlResponse(
         String slug,
         String longUrl
-) {}
+) {
+}

@@ -1,4 +1,4 @@
-package com.linkflow.shorturl.dto;
+package com.linkflow.api.link.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -9,4 +9,5 @@ public record CreateShortUrlRequest(
         @Size(max = 2048, message = "longUrl length must be <= 2048")
         @URL(message = "longUrl must be a valid URL")
         String longUrl
-) {}
+) {
+}

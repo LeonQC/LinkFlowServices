@@ -1,7 +1,7 @@
-package com.linkflow.shorturl.service;
+package com.linkflow.api.link.service;
 
-import com.linkflow.shorturl.domain.UrlMapping;
-import com.linkflow.shorturl.repository.UrlMappingRepository;
+import com.linkflow.api.link.domain.UrlMapping;
+import com.linkflow.api.link.repository.UrlMappingRepository;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,7 +14,7 @@ public class UrlCodecService {
 
     private static final int SLUG_LENGTH = 7;
     private static final int MAX_RETRY = 10;
-    private static final String ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"; // 短码字符集（62进制）
+    private static final String ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
     private final UrlMappingRepository repository;
     private final SecureRandom random = new SecureRandom();
@@ -23,14 +23,13 @@ public class UrlCodecService {
         this.repository = repository;
     }
 
-    // 写操作事务：查+写要在一致上下文中执行
     @Transactional
     public UrlMapping createOrGet(String longUrl) {
         return repository.findByLongUrl(longUrl)
                 .orElseGet(() -> createWithRetry(longUrl));
     }
 
-    @Transactional(readOnly = true) // 只读事务，优化查询语义
+    @Transactional(readOnly = true)
     public UrlMapping resolve(String slug) {
         return repository.findBySlug(slug)
                 .orElseThrow(() -> new NoSuchElementException("short url not found"));
@@ -46,7 +45,6 @@ public class UrlCodecService {
                 if (existing.isPresent()) {
                     return existing.get();
                 }
-
             }
         }
         throw new IllegalStateException("failed to generate unique slug after retries");
