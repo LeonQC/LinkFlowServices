@@ -16,3 +16,11 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+
+app:
+  security:
+    jwt:
+      issuer: linkflow-service
+      secret: ${LINKFLOW_JWT_SECRET:linkflow-development-jwt-secret-key-32b}
+      access-token-ttl: PT1H
+      refresh-token-ttl: P7D
