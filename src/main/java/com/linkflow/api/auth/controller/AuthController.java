@@ -1,6 +1,9 @@
 package com.linkflow.api.auth.controller;
 
 import com.linkflow.api.auth.dto.AuthUserResponse;
+import com.linkflow.api.auth.dto.LoginRequest;
+import com.linkflow.api.auth.dto.LoginResponse;
+import com.linkflow.api.auth.dto.RefreshTokenRequest;
 import com.linkflow.api.auth.dto.RegisterRequest;
 import com.linkflow.api.auth.service.AuthService;
 import com.linkflow.api.common.response.ApiResponse;
@@ -26,5 +29,23 @@ public class AuthController {
     public ResponseEntity<ApiResponse<AuthUserResponse>> register(@Valid @RequestBody RegisterRequest request) {
         AuthUserResponse user = authService.register(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(user));
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest request) {
+        LoginResponse login = authService.login(request);
+        return ResponseEntity.ok(ApiResponse.success(login));
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<ApiResponse<LoginResponse>> refresh(@Valid @RequestBody RefreshTokenRequest request) {
+        LoginResponse login = authService.refresh(request);
+        return ResponseEntity.ok(ApiResponse.success(login));
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<ApiResponse<Void>> logout(@Valid @RequestBody RefreshTokenRequest request) {
+        authService.logout(request);
+        return ResponseEntity.ok(ApiResponse.success(null));
     }
 }
